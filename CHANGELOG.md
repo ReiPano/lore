@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — Milestone 1 (polish, security, CI)
+
+- **File-level hit aggregation.** `HybridSearch.aquery` now diversifies results by `source_path` so one hot file cannot monopolize the top-k. Enabled by default (`aggregate_by_file=True`); override per-call or disable in the constructor. New helper `_dedupe_by_source` in `search.py`.
+- **Linear-time TextChunker.** Rewrote `TextChunker.split` with a byte-offset map built via `enc.decode_single_token_bytes`. Replaces the previous O(n²) prefix-decode loop. Multi-megabyte files now chunk in well under a second; added regression tests covering UTF-8 boundaries and a 200k-token synthetic input.
+- **Sensitive-file defaults.** `config.yaml` ships an expanded `exclude_patterns` list (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `id_ed25519*`, `credentials.json`, `.npmrc`, `.pypirc`, etc.) plus a new `exclude_content_patterns` regex list (Anthropic, OpenAI project, AWS, GitHub, Slack tokens, PEM private-key headers). Indexer scans the first 32 KB of each candidate file and skips it if any pattern matches; records `files_skipped_sensitive` on `IndexStats`.
+- **GitHub Actions CI.** Added `.github/workflows/ci.yml`. Runs `ruff check` + `pytest -q` on pushes and PRs across Python 3.11 / 3.12 (Ubuntu) and Python 3.12 (macOS).
+- **Tests.** Added `tests/test_config.py` plus new cases in `test_search.py`, `test_chunking.py`, `test_indexer.py` covering aggregation, chunker invariants, sensitive-file skip by filename and by content, and config loading with the new field. Suite now at 157 tests.
+- README "Exclusions" section documents the new defaults.
+
 ## Unreleased
 
 ### Phase 12 — Unified CLI

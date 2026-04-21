@@ -190,3 +190,41 @@ def test_chunk_is_frozen() -> None:
     )
     with pytest.raises(Exception):
         chunk.text = "mutated"  # type: ignore[misc]
+
+
+def test_text_chunker_offsets_match_for_large_input() -> None:
+    """Regression guard: the byte-offset map must produce exact slices.
+
+    Uses a mixed ASCII + multibyte text so UTF-8 boundaries get exercised.
+    """
+    body = (
+        "Hybrid search combines BM25 and vectors. "
+        "Rare identifiers like `sha256_hash_v1` matter. "
+        "Multibyte content — é à ñ 漢字 emoji 🚀 — stays aligned. "
+    ) * 120
+    chunker = TextChunker(chunk_size=80, chunk_overlap=16)
+    chunks = chunker.split(body, "doc.txt")
+    assert len(chunks) > 10
+    for chunk in chunks:
+        assert body[chunk.start_offset : chunk.end_offset] == chunk.text
+        # Multibyte boundaries can shift the re-encoded token count by a
+        # couple of tokens. Allow a small slack; the important invariant is
+        # that chunks stay bounded and slice cleanly back out of `body`.
+        assert token_count(chunk.text) <= 80 + 4
+
+
+def test_text_chunker_scales_linearly_for_huge_input() -> None:
+    """Sanity check: 200k-token input finishes fast with the new O(n) path."""
+    import time
+
+    body = ("hybrid search " * 50_000).strip()
+    chunker = TextChunker(chunk_size=500, chunk_overlap=50)
+    start = time.perf_counter()
+    chunks = chunker.split(body, "big.txt")
+    elapsed = time.perf_counter() - start
+    assert chunks, "expected at least one chunk"
+    # Pre-patch implementation took many seconds on this size; new path
+    # finishes in well under a second on a laptop.
+    assert elapsed < 5.0, f"chunker regressed: {elapsed:.2f}s"
+    for chunk in chunks[:5]:
+        assert body[chunk.start_offset : chunk.end_offset] == chunk.text

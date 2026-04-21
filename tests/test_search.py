@@ -163,3 +163,99 @@ def test_returned_results_respect_k(stack) -> None:
     search = HybridSearch(lex, vec, rerank_enabled=False, retrieval_k_per_index=10)
     assert len(search.query("vector", k=2)) <= 2
     assert len(search.query("vector", k=10)) <= 5  # corpus has 5 chunks
+
+
+def test_aggregate_by_file_keeps_one_chunk_per_source(tmp_path: Path) -> None:
+    """Default aggregation must not let one hot file dominate the top-k."""
+    lex = LexicalIndex(tmp_path / "lex.sqlite3")
+    vec = VectorIndex.in_memory("agg_one", FakeEmbedder(dim=32))
+    try:
+        source = "docs/hot.md"
+        busy_chunks = [
+            _chunk(source, i * 100, f"needle_term chunk number {i} with extra text")
+            for i in range(4)
+        ]
+        other_chunks = [
+            _chunk("docs/a.md", 0, "needle_term distinct context one"),
+            _chunk("docs/b.md", 0, "needle_term distinct context two"),
+        ]
+        corpus = busy_chunks + other_chunks
+        lex.add(corpus)
+        vec.add(corpus)
+
+        search = HybridSearch(
+            lex,
+            vec,
+            rerank_enabled=False,
+            retrieval_k_per_index=10,
+            default_k=3,
+        )
+        results = search.query("needle_term")
+        sources = [r.source_path for r in results]
+        assert len(sources) == 3
+        assert len(set(sources)) == 3, (
+            f"expected one chunk per source but got {sources}"
+        )
+    finally:
+        lex.close()
+        vec.close()
+
+
+def test_aggregate_by_file_disable_keeps_original_order(tmp_path: Path) -> None:
+    """With aggregation off, duplicate-source chunks are allowed in the top-k."""
+    lex = LexicalIndex(tmp_path / "lex.sqlite3")
+    vec = VectorIndex.in_memory("agg_off", FakeEmbedder(dim=32))
+    try:
+        source = "docs/hot.md"
+        busy_chunks = [
+            _chunk(source, i * 100, f"needle_term chunk number {i} with extra text")
+            for i in range(4)
+        ]
+        lex.add(busy_chunks)
+        vec.add(busy_chunks)
+
+        search = HybridSearch(
+            lex,
+            vec,
+            rerank_enabled=False,
+            retrieval_k_per_index=10,
+            default_k=3,
+            aggregate_by_file=False,
+        )
+        results = search.query("needle_term")
+        sources = [r.source_path for r in results]
+        # All three results come from the same file when aggregation is off.
+        assert sources == [source, source, source]
+    finally:
+        lex.close()
+        vec.close()
+
+
+def test_aggregate_by_file_per_call_override(tmp_path: Path) -> None:
+    lex = LexicalIndex(tmp_path / "lex.sqlite3")
+    vec = VectorIndex.in_memory("agg_override", FakeEmbedder(dim=32))
+    try:
+        source = "docs/hot.md"
+        corpus = [
+            _chunk(source, i * 100, f"needle_term chunk {i} extra")
+            for i in range(3)
+        ] + [
+            _chunk("docs/solo.md", 0, "needle_term solo entry"),
+        ]
+        lex.add(corpus)
+        vec.add(corpus)
+
+        search = HybridSearch(
+            lex,
+            vec,
+            rerank_enabled=False,
+            retrieval_k_per_index=10,
+            default_k=3,
+            aggregate_by_file=True,
+        )
+        off_results = search.query("needle_term", aggregate_by_file=False)
+        off_sources = [r.source_path for r in off_results]
+        assert off_sources.count(source) >= 2  # aggregation suppressed per call
+    finally:
+        lex.close()
+        vec.close()

@@ -167,6 +167,36 @@ exclude_patterns:
   - "*.iml"
   - "*.ipr"
   - "*.iws"
+  # secrets and keys — keep sensitive filenames out of the index by default
+  - ".env"
+  - ".env.*"
+  - "*.env"
+  - "*.pem"
+  - "*.key"
+  - "id_rsa"
+  - "id_rsa.pub"
+  - "id_dsa*"
+  - "id_ecdsa*"
+  - "id_ed25519*"
+  - "credentials.json"
+  - "*.kdbx"
+  - ".npmrc"
+  - ".pypirc"
+  - "secret.yaml"
+  - "secrets.yaml"
+
+# Regex patterns applied to the first 32 KB of each candidate file. If any
+# matches, the file is skipped and recorded as files_skipped_sensitive.
+# Defaults target common provider secret prefixes.
+exclude_content_patterns:
+  - "sk-ant-[A-Za-z0-9\\-_]{20,}"
+  - "sk-proj-[A-Za-z0-9\\-_]{20,}"
+  - "AKIA[0-9A-Z]{16}"
+  - "ghp_[A-Za-z0-9]{20,}"
+  - "gho_[A-Za-z0-9]{20,}"
+  - "github_pat_[A-Za-z0-9_]{20,}"
+  - "xox[baprs]-[A-Za-z0-9-]{20,}"
+  - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
 
 api:
   host: 127.0.0.1

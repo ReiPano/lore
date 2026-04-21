@@ -52,6 +52,8 @@ class HybridSearch:
         rerank_top_n: int = 20,
         default_k: int = 10,
         rerank_enabled: bool = True,
+        aggregate_by_file: bool = True,
+        max_per_file: int = 1,
     ) -> None:
         self.lexical = lexical
         self.vector = vector
@@ -63,6 +65,8 @@ class HybridSearch:
         self.rerank_top_n = rerank_top_n
         self.default_k = default_k
         self.rerank_enabled = rerank_enabled
+        self.aggregate_by_file = aggregate_by_file
+        self.max_per_file = max(1, int(max_per_file))
 
     # ---- public API ---------------------------------------------------
 
@@ -72,8 +76,11 @@ class HybridSearch:
         k: int | None = None,
         *,
         rerank: bool | None = None,
+        aggregate_by_file: bool | None = None,
     ) -> list[SearchResult]:
-        return asyncio.run(self.aquery(query, k, rerank=rerank))
+        return asyncio.run(
+            self.aquery(query, k, rerank=rerank, aggregate_by_file=aggregate_by_file)
+        )
 
     async def aquery(
         self,
@@ -81,6 +88,7 @@ class HybridSearch:
         k: int | None = None,
         *,
         rerank: bool | None = None,
+        aggregate_by_file: bool | None = None,
     ) -> list[SearchResult]:
         if not query or not query.strip():
             return []
@@ -135,6 +143,16 @@ class HybridSearch:
 
         t_reranked = time.perf_counter()
 
+        do_aggregate = (
+            aggregate_by_file if aggregate_by_file is not None else self.aggregate_by_file
+        )
+        if do_aggregate and ordered:
+            ordered = _dedupe_by_source(
+                ordered,
+                chunks_by_id,
+                max_per_file=self.max_per_file,
+            )
+
         results: list[SearchResult] = []
         for doc_id, _ in ordered[:limit]:
             chunk = chunks_by_id.get(doc_id)
@@ -172,6 +190,7 @@ class HybridSearch:
                     "query": query,
                     "k": limit,
                     "rerank": do_rerank,
+                    "aggregate_by_file": do_aggregate,
                     "bm25_hits": len(bm25_hits),
                     "vector_hits": len(vec_hits),
                     "fused_hits": len(fused),
@@ -188,3 +207,38 @@ class HybridSearch:
             )
         )
         return results
+
+
+def _dedupe_by_source(
+    ordered: list[tuple[str, float]],
+    chunks_by_id: dict,
+    *,
+    max_per_file: int,
+) -> list[tuple[str, float]]:
+    """Two-pass file diversification.
+
+    Pass 1 walks ``ordered`` in score order and keeps the first
+    ``max_per_file`` chunks per ``source_path``. Pass 2 appends everything
+    that did not make the first cut so the caller can still backfill if it
+    needs more results than unique sources. Chunks whose hydration lookup
+    failed (not in ``chunks_by_id``) are kept in their original slot — we
+    can't group what we can't identify.
+    """
+    primary: list[tuple[str, float]] = []
+    overflow: list[tuple[str, float]] = []
+    per_source: dict[str, int] = {}
+    for entry in ordered:
+        doc_id, _ = entry
+        chunk = chunks_by_id.get(doc_id)
+        if chunk is None:
+            # Can't group; keep it in the primary list at its natural position.
+            primary.append(entry)
+            continue
+        source = chunk.source_path
+        count = per_source.get(source, 0)
+        if count < max_per_file:
+            primary.append(entry)
+            per_source[source] = count + 1
+        else:
+            overflow.append(entry)
+    return primary + overflow

@@ -188,6 +188,45 @@ def test_exclude_patterns_skip_matching_files(tmp_path: Path, stack) -> None:
     assert all("min.js" not in s for s in sources)
 
 
+def test_sensitive_file_skip_by_name(tmp_path: Path, stack) -> None:
+    lex, vec = stack
+    real = _write(tmp_path, "note.md", "# Keep\n\nRegular content, safe.")
+    secret = _write(tmp_path, ".env", "API_KEY=abcd1234\nDEBUG=true\n")
+    # .env is in supported_extensions only if we add it; but it's also in
+    # exclude_patterns, so it should be skipped regardless.
+    indexer = Indexer(
+        lex,
+        vec,
+        supported_extensions=[".md", ".env"],
+        exclude_patterns=[".env", ".env.*"],
+    )
+    stats = indexer.index_path(tmp_path)
+    sources = lex.sources()
+    assert any("note.md" in s for s in sources)
+    assert all(not s.endswith("/.env") for s in sources)
+    assert stats.chunks_added > 0
+    _ = real, secret  # silence unused
+
+
+def test_sensitive_file_skip_by_content(tmp_path: Path, stack) -> None:
+    lex, vec = stack
+    _write(tmp_path, "keep.md", "# Keep\n\nNo secrets here.")
+    _write(
+        tmp_path,
+        "leaky.md",
+        "# Notes\n\nDon't commit this: sk-ant-abcdefghijklmnop012345.\n",
+    )
+    indexer = Indexer(
+        lex,
+        vec,
+        exclude_content_patterns=[r"sk-ant-[A-Za-z0-9\-_]{20,}"],
+    )
+    stats = indexer.index_path(tmp_path)
+    assert stats.files_skipped_sensitive == 1
+    assert all("leaky.md" not in s for s in lex.sources())
+    assert any("keep.md" in s for s in lex.sources())
+
+
 def test_exclude_dirs_merged_with_builtin(tmp_path: Path, stack) -> None:
     lex, vec = stack
     # Built-in .git pruning + user-added .next.

@@ -110,21 +110,34 @@ class TextChunker:
         if not tokens:
             return []
 
+        # Build a token-index -> char-offset map in O(text_size). The previous
+        # implementation decoded `tokens[:i]` every iteration, which is
+        # quadratic for long files.
+        token_char_offsets = _token_char_offsets(enc, tokens, text)
+
         chunks: list[Chunk] = []
         step = self.chunk_size - self.chunk_overlap
+        n_tokens = len(tokens)
         i = 0
-        while i < len(tokens):
-            prefix = enc.decode(tokens[:i]) if i else ""
-            window = tokens[i : i + self.chunk_size]
-            piece = enc.decode(window)
+        while i < n_tokens:
+            end_tok = min(i + self.chunk_size, n_tokens)
+            char_start = token_char_offsets[i]
+            char_end = token_char_offsets[end_tok]
+            piece = text[char_start:char_end]
             if not piece:
                 break
-            start_offset = len(prefix)
-            if text[start_offset : start_offset + len(piece)] != piece:
-                # Rare BPE boundary drift: search a tight window then fall back.
-                start_offset = _find_near(text, piece, start_offset)
-            chunks.append(_build_chunk(source_path, piece, base_offset + start_offset, metadata))
-            if i + self.chunk_size >= len(tokens):
+            # Safety net: if the byte map disagrees with what tiktoken decode
+            # produces (rare BPE drift), fall back to nearby search so offsets
+            # always satisfy `text[start:start+len(piece)] == piece`.
+            if text[char_start : char_start + len(piece)] != piece:
+                decoded = enc.decode(tokens[i:end_tok])
+                if decoded:
+                    piece = decoded
+                    char_start = _find_near(text, piece, char_start)
+            chunks.append(
+                _build_chunk(source_path, piece, base_offset + char_start, metadata)
+            )
+            if end_tok >= n_tokens:
                 break
             i += step
         return chunks
@@ -323,6 +336,51 @@ def _fenced_code_spans(text: str) -> list[tuple[int, int]]:
         spans.append((start_line, end))
         pos = end
     return spans
+
+
+def _token_char_offsets(enc, tokens: list[int], text: str) -> list[int]:
+    """Return a list of length ``len(tokens) + 1`` mapping token boundaries
+    to character offsets in ``text``.
+
+    Works by (1) computing each token's byte width via
+    ``enc.decode_single_token_bytes``, (2) building a byte-to-char map for
+    the source text's UTF-8 encoding, and (3) indexing the byte offset at
+    each token boundary through that map. Total work is O(len(text)) plus
+    O(len(tokens)) — linear, so large files no longer trigger the old
+    quadratic prefix-decode.
+    """
+    # Per-token byte widths.
+    byte_widths: list[int] = [
+        len(enc.decode_single_token_bytes(tok)) for tok in tokens
+    ]
+    cum_bytes: list[int] = [0] * (len(tokens) + 1)
+    for i, width in enumerate(byte_widths):
+        cum_bytes[i + 1] = cum_bytes[i] + width
+
+    # byte_to_char[b] = index of the character that starts at byte offset b.
+    # The array has len(utf8_bytes) + 1 entries so we can always look up the
+    # tail position safely.
+    src_bytes = text.encode("utf-8")
+    total_bytes = len(src_bytes)
+    byte_to_char = [0] * (total_bytes + 1)
+    byte_pos = 0
+    for char_pos, ch in enumerate(text):
+        width = len(ch.encode("utf-8"))
+        for _ in range(width):
+            if byte_pos < total_bytes:
+                byte_to_char[byte_pos] = char_pos
+                byte_pos += 1
+    byte_to_char[total_bytes] = len(text)
+
+    offsets: list[int] = []
+    for byte_off in cum_bytes:
+        if byte_off <= total_bytes:
+            offsets.append(byte_to_char[byte_off])
+        else:
+            # BPE sometimes emits a trailing byte not present in the source
+            # encoding; pin to end-of-text so callers still get a valid slice.
+            offsets.append(len(text))
+    return offsets
 
 
 def _find_near(text: str, piece: str, expected: int) -> int:

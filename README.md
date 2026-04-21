@@ -366,6 +366,15 @@ Built-in pruned directories (always on):
 
 Default user-configured additions in `config.yaml` cover React, Angular, Next.js, Nuxt, SvelteKit, Java/Maven/Gradle, JetBrains/VS Code, macOS metadata, and common caches. Edit `exclude_dirs` / `exclude_patterns` to taste; see comments inline.
 
+### Sensitive-file defaults
+
+`config.yaml` ships two layers of protection:
+
+- `exclude_patterns` adds common secret-bearing filenames (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `id_ed25519*`, `credentials.json`, `.npmrc`, `.pypirc`, `secret.yaml`).
+- `exclude_content_patterns` is a regex list applied to the first 32 KB of every candidate file. Defaults match `sk-ant-…`, `sk-proj-…`, `AKIA…`, `ghp_…`, `gho_…`, `github_pat_…`, `xox[baprs]-…`, and inline PEM private keys. Any match makes the file skip indexing entirely and increments `files_skipped_sensitive` in the run stats.
+
+Opt out by editing either list (or emptying it) in your user config. Opt in to new defaults after a future upgrade by running `lore init --force`.
+
 Watcher and indexer share these rules, so ignored paths never enter the index even if you create them while the watcher is running.
 
 ---

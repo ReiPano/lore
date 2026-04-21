@@ -101,6 +101,7 @@ class Config:
     supported_extensions: list[str] = field(default_factory=list)
     exclude_dirs: list[str] = field(default_factory=list)
     exclude_patterns: list[str] = field(default_factory=list)
+    exclude_content_patterns: list[str] = field(default_factory=list)
     api: ApiConfig = field(default_factory=ApiConfig)
     log_path: Path | None = None
 
@@ -130,6 +131,7 @@ def load_config(path: str | Path | None = None) -> Config:
         supported_extensions=list(raw.get("supported_extensions") or []),
         exclude_dirs=list(raw.get("exclude_dirs") or []),
         exclude_patterns=list(raw.get("exclude_patterns") or []),
+        exclude_content_patterns=list(raw.get("exclude_content_patterns") or []),
         api=ApiConfig(
             host=api_raw.get("host", "127.0.0.1"),
             port=int(api_raw.get("port", 8765)),

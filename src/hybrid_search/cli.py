@@ -89,6 +89,7 @@ def _build_indexer(cfg: Config, lex: LexicalIndex, vec: VectorIndex) -> Indexer:
         show_progress=True,
         exclude_dirs=cfg.exclude_dirs or None,
         exclude_patterns=cfg.exclude_patterns or None,
+        exclude_content_patterns=cfg.exclude_content_patterns or None,
     )
 
 
