@@ -1,0 +1,8 @@
+{"id": "project-overview", "prompt": "Give me a 5-bullet overview of the projects currently indexed in my hybrid-search memory. If you cannot tell, say so briefly.", "notes": "mcp lookup; plain cannot answer"}
+{"id": "find-auth", "prompt": "Where is authentication or login handled across my indexed code? Point me at specific files.", "notes": "mcp lookup"}
+{"id": "todo-scan", "prompt": "List up to 5 TODO or FIXME items you can find in my indexed projects, with the file each lives in.", "notes": "mcp lookup"}
+{"id": "explain-rrf", "prompt": "In 3 sentences, explain reciprocal rank fusion and when it is useful.", "notes": "control; model-only knowledge"}
+{"id": "config-lookup", "prompt": "What chunk_size does my hybrid-search project use? Look in config.yaml if you have a tool for it.", "notes": "mcp lookup"}
+{"id": "mcp-tools", "prompt": "Which MCP tools do you have available right now? List their names and a one-line description.", "notes": "meta; plain answers 'none'"}
+{"id": "react-components", "prompt": "Name three React components you can find in my indexed code and describe each one in a single sentence.", "notes": "mcp lookup"}
+{"id": "generic-summary", "prompt": "Write a 3-line summary of hybrid search (BM25 + vector). No retrieval needed.", "notes": "control; equal cost across configs"}

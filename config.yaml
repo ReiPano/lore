@@ -1,0 +1,176 @@
+index_path: ~/.lore/lexical.sqlite3
+qdrant_url: http://localhost:6333
+collection_name: hybrid_chunks
+
+embedding_model: BAAI/bge-small-en-v1.5
+embedding_dim: 384
+rerank_model: BAAI/bge-reranker-base
+rerank_enabled: true
+
+chunk_size: 500
+chunk_overlap: 50
+
+fusion_k: 60
+bm25_weight: 1.0
+vector_weight: 1.0
+retrieval_k_per_index: 50
+rerank_top_n: 20
+default_result_k: 10
+
+watch_paths: []
+max_file_bytes: 1048576
+
+# Allowed file extensions (whitelist). Anything else is skipped outright.
+supported_extensions:
+  - .md
+  - .mdx
+  - .txt
+  - .rst
+  - .adoc
+  - .py
+  - .js
+  - .jsx
+  - .ts
+  - .tsx
+  - .mjs
+  - .cjs
+  - .vue
+  - .svelte
+  - .astro
+  - .java
+  - .kt
+  - .kts
+  - .groovy
+  - .scala
+  - .c
+  - .h
+  - .cpp
+  - .hpp
+  - .cc
+  - .hh
+  - .go
+  - .rs
+  - .html
+  - .htm
+  - .css
+  - .scss
+  - .sass
+  - .less
+  - .yaml
+  - .yml
+  - .toml
+  - .ini
+  - .cfg
+  - .properties
+  - .conf
+  - .sh
+  - .bash
+  - .zsh
+  - .ps1
+  - .gradle
+  - .pdf
+  - .docx
+  - .sql
+
+# Directory names pruned anywhere in the tree. Merged with built-in pruned set.
+exclude_dirs:
+  - .idea
+  - .vscode
+  - .vs
+  - .settings
+  - .fleet
+  - bower_components
+  - .npm
+  - .yarn
+  - .pnpm-store
+  - .parcel-cache
+  - .cache
+  - .turbo
+  - .next
+  - .nuxt
+  - .svelte-kit
+  - .output
+  - .vercel
+  - .netlify
+  - .serverless
+  - out
+  - storybook-static
+  - .nyc_output
+  - .angular
+  - coverage
+  - .firebase
+  - target
+  - .gradle
+  - .mvn
+  - bin
+  - .apt_generated
+  - .kotlin
+  - .tox
+  - env
+  - .eggs
+  - vendor
+  - tmp
+  - temp
+  - logs
+  - log
+  - __MACOSX
+  - .run
+  - __snapshots__
+
+# Glob patterns matched against file name / relative / full path.
+exclude_patterns:
+  - "*.min.js"
+  - "*.min.css"
+  - "*.min.mjs"
+  - "*.bundle.js"
+  - "*.chunk.js"
+  - "*.worker.js"
+  - "*.map"
+  - "package-lock.json"
+  - "yarn.lock"
+  - "pnpm-lock.yaml"
+  - "bun.lockb"
+  - "Pipfile.lock"
+  - "poetry.lock"
+  - "composer.lock"
+  - "Gemfile.lock"
+  - "Cargo.lock"
+  - "go.sum"
+  - "*.class"
+  - "*.jar"
+  - "*.war"
+  - "*.ear"
+  - "*.pyc"
+  - "*.pyo"
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.gif"
+  - "*.webp"
+  - "*.ico"
+  - "*.woff"
+  - "*.woff2"
+  - "*.ttf"
+  - "*.eot"
+  - "*.otf"
+  - "*.mp3"
+  - "*.mp4"
+  - "*.mov"
+  - "*.zip"
+  - "*.tar"
+  - "*.tar.gz"
+  - "*.tgz"
+  - "*.rar"
+  - "*.7z"
+  - "*.iml"
+  - "*.ipr"
+  - "*.iws"
+
+api:
+  host: 127.0.0.1
+  port: 8765
+  auth_token: null
+
+log_path: ~/.lore/hybrid-search.log

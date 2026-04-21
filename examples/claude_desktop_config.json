@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "lore": {
+      "command": "/ABSOLUTE/PATH/TO/better-mem/.venv/bin/lore",
+      "args": ["--config", "/ABSOLUTE/PATH/TO/.better-mem/config.yaml", "serve-mcp"],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

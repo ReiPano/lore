@@ -1,0 +1,10 @@
+{"query": "What is BM25 good at?", "must_contain": ["BM25"], "notes": "natural language about lexical ranker"}
+{"query": "identifier lookup rare terms", "must_contain": ["identifiers", "rare terms"], "notes": "keywords only"}
+{"query": "How does reciprocal rank fusion combine results?", "must_contain": ["reciprocal rank fusion", "RRF"], "notes": "paraphrased"}
+{"query": "cross-encoder reranker latency", "must_contain": ["cross-encoder", "reranker"], "notes": "rare term + identifier"}
+{"query": "bge-small-en-v1.5 dimension", "must_contain": ["bge-small-en-v1.5", "384"], "notes": "exact identifier lookup"}
+{"query": "How should I split Markdown for search?", "must_contain": ["Markdown", "chunkers"], "notes": "natural language"}
+{"query": "MCP stdio Claude Desktop", "must_contain": ["MCP", "stdio"], "notes": "acronym + identifier"}
+{"query": "Qdrant in-memory testing", "must_contain": ["Qdrant", ":memory:"], "notes": "proper noun + literal"}
+{"query": "stable chunk identifiers between reindexes", "must_contain": ["Chunk IDs", "deterministic"], "notes": "paraphrase"}
+{"query": "watchdog debounce editor save storm", "must_contain": ["watchdog", "debounces"], "notes": "paraphrase with ids"}
