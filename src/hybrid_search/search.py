@@ -77,9 +77,16 @@ class HybridSearch:
         *,
         rerank: bool | None = None,
         aggregate_by_file: bool | None = None,
+        source_prefix: str | None = None,
     ) -> list[SearchResult]:
         return asyncio.run(
-            self.aquery(query, k, rerank=rerank, aggregate_by_file=aggregate_by_file)
+            self.aquery(
+                query,
+                k,
+                rerank=rerank,
+                aggregate_by_file=aggregate_by_file,
+                source_prefix=source_prefix,
+            )
         )
 
     async def aquery(
@@ -89,6 +96,7 @@ class HybridSearch:
         *,
         rerank: bool | None = None,
         aggregate_by_file: bool | None = None,
+        source_prefix: str | None = None,
     ) -> list[SearchResult]:
         if not query or not query.strip():
             return []
@@ -102,10 +110,18 @@ class HybridSearch:
         t_start = time.perf_counter()
 
         bm25_task = asyncio.to_thread(
-            self.lexical.search, query, self.retrieval_k_per_index
+            lambda: self.lexical.search(
+                query,
+                self.retrieval_k_per_index,
+                source_prefix=source_prefix,
+            )
         )
         vec_task = asyncio.to_thread(
-            self.vector.search, query, self.retrieval_k_per_index
+            lambda: self.vector.search(
+                query,
+                self.retrieval_k_per_index,
+                source_prefix=source_prefix,
+            )
         )
         bm25_hits, vec_hits = await asyncio.gather(bm25_task, vec_task)
 
@@ -191,6 +207,7 @@ class HybridSearch:
                     "k": limit,
                     "rerank": do_rerank,
                     "aggregate_by_file": do_aggregate,
+                    "source_prefix": source_prefix,
                     "bm25_hits": len(bm25_hits),
                     "vector_hits": len(vec_hits),
                     "fused_hits": len(fused),
@@ -207,6 +224,88 @@ class HybridSearch:
             )
         )
         return results
+
+    # ---- convenience wrappers -----------------------------------------
+
+    async def asearch_in_file(
+        self,
+        path: str,
+        query: str,
+        k: int | None = None,
+        *,
+        rerank: bool | None = None,
+    ) -> list[SearchResult]:
+        return await self.aquery(
+            query,
+            k,
+            rerank=rerank,
+            source_prefix=path,
+            aggregate_by_file=False,
+        )
+
+    def search_in_file(
+        self,
+        path: str,
+        query: str,
+        k: int | None = None,
+        *,
+        rerank: bool | None = None,
+    ) -> list[SearchResult]:
+        return asyncio.run(self.asearch_in_file(path, query, k, rerank=rerank))
+
+    async def arelated(
+        self,
+        chunk_id: str,
+        k: int | None = None,
+        *,
+        source_prefix: str | None = None,
+    ) -> list[SearchResult]:
+        """Return chunks semantically similar to ``chunk_id``.
+
+        Looks the chunk up in SQLite, re-embeds its text, then runs a vector
+        search while filtering the original chunk out of the result set.
+        """
+        limit = k if k is not None else self.default_k
+        if limit <= 0:
+            return []
+        chunk = await asyncio.to_thread(self.lexical.get, chunk_id)
+        if chunk is None:
+            return []
+        vector = await asyncio.to_thread(self.vector.embedder.embed_one, chunk.text)
+        hits = await asyncio.to_thread(
+            lambda: self.vector.search_by_vector(
+                list(vector),
+                limit,
+                source_prefix=source_prefix,
+                exclude_ids=[chunk_id],
+            )
+        )
+        ids = [cid for cid, _ in hits]
+        chunks_by_id = {c.id: c for c in self.lexical.get_many(ids)}
+        results: list[SearchResult] = []
+        for cid, score in hits:
+            c = chunks_by_id.get(cid)
+            if c is None:
+                continue
+            results.append(
+                SearchResult(
+                    chunk_id=cid,
+                    text=c.text,
+                    source_path=c.source_path,
+                    score=float(score),
+                    scores_breakdown={"vector": float(score)},
+                )
+            )
+        return results
+
+    def related(
+        self,
+        chunk_id: str,
+        k: int | None = None,
+        *,
+        source_prefix: str | None = None,
+    ) -> list[SearchResult]:
+        return asyncio.run(self.arelated(chunk_id, k, source_prefix=source_prefix))
 
 
 def _dedupe_by_source(

@@ -118,6 +118,66 @@ async def test_get_chunk_tool(stack) -> None:
         assert _unwrap(result) is None
 
 
+async def test_search_tool_respects_project(stack, tmp_path) -> None:
+    lex, _, indexer, search, tmp = stack
+    _write(tmp, "proj-a/a.md", "# A\n\nwidget_v7 inside project A body")
+    _write(tmp, "proj-b/b.md", "# B\n\nwidget_v7 inside project B body")
+    indexer.index_path(tmp)
+
+    from hybrid_search.projects import ProjectStore
+
+    store = ProjectStore(tmp_path / "projects.json")
+    store.add(tmp / "proj-a", name="proj-a", watch=True)
+
+    server = create_server(search=search, indexer=indexer, project_store=store)
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "search",
+            {"query": "widget_v7", "project": "proj-a"},
+        )
+        hits = _unwrap(result)
+        assert hits
+        assert all("proj-a" in h["source_path"] for h in hits)
+
+
+async def test_related_tool_returns_similar_chunks(stack, tmp_path) -> None:
+    lex, _, indexer, search, tmp = stack
+    seed = _write(tmp, "notes/a.md", "# A\n\nshared topic about retrieval.")
+    _write(tmp, "notes/b.md", "# B\n\nshared topic about retrieval.")
+    _write(tmp, "notes/c.md", "# C\n\nunrelated kangaroo fauna.")
+    indexer.index_path(tmp)
+
+    ids = lex.chunk_ids_for_source(str(seed.resolve()))
+    assert ids
+
+    server = create_server(search=search, indexer=indexer)
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "related",
+            {"chunk_id": ids[0], "k": 2},
+        )
+        hits = _unwrap(result)
+        assert hits
+        assert all(h["chunk_id"] != ids[0] for h in hits)
+
+
+async def test_search_in_file_tool_scopes_to_path(stack) -> None:
+    lex, _, indexer, search, tmp = stack
+    target = _write(tmp, "proj/main.py", "def widget_fn():\n    return 'widget_marker'\n")
+    _write(tmp, "proj/other.py", "def other_fn():\n    return 'widget_marker elsewhere'\n")
+    indexer.index_path(tmp)
+
+    server = create_server(search=search, indexer=indexer)
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "search_in_file",
+            {"path": str(target.resolve()), "query": "widget_marker"},
+        )
+        hits = _unwrap(result)
+        assert hits
+        assert all(str(target.resolve()) == h["source_path"] for h in hits)
+
+
 async def test_resources_registered_and_readable(stack) -> None:
     _, _, indexer, search, tmp = stack
     _write(tmp, "alpha.md", "# Alpha\n\nFirst source text.")

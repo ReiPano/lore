@@ -80,6 +80,15 @@ class IndexStats:
 
 SENSITIVE_SCAN_BYTES = 32 * 1024  # enough to catch most dotfile secrets
 
+# Bail from an index run once this many consecutive files hit an exception
+# during vector upsert. Prevents a corrupted Qdrant collection from silently
+# eating an entire reindex.
+VECTOR_FAIL_FAST_LIMIT = 5
+
+
+class IndexerStopped(RuntimeError):
+    """Raised to abort index_path early when the backend is unhealthy."""
+
 
 class Indexer:
     def __init__(
@@ -111,6 +120,7 @@ class Indexer:
         self.content_patterns: list[re.Pattern[str]] = _compile_content_patterns(
             exclude_content_patterns or ()
         )
+        self._consecutive_vector_failures = 0
 
     # ---- public API ---------------------------------------------------
 
@@ -126,11 +136,16 @@ class Indexer:
 
         files = list(self._walk(p))
         stats.files_seen = len(files)
-        for child_path in self._iter_with_progress(files):
-            child_stats = self._index_one(child_path)
-            # _index_one counts its own files_seen; drop that to avoid double counting.
-            child_stats.files_seen = 0
-            stats.merge(child_stats)
+        self._consecutive_vector_failures = 0
+        try:
+            for child_path in self._iter_with_progress(files):
+                child_stats = self._index_one(child_path)
+                # _index_one counts its own files_seen; drop that to avoid double counting.
+                child_stats.files_seen = 0
+                stats.merge(child_stats)
+        except IndexerStopped as exc:
+            stats.errors.append((str(p), str(exc)))
+            log.error("indexer stopped early: %s", exc)
         return stats
 
     def index_file(self, path: str | Path) -> IndexStats:
@@ -287,6 +302,7 @@ class Indexer:
                 self.vector.add(to_add)
                 self.lexical.add(to_add)
                 stats.chunks_added = len(to_add)
+                self._consecutive_vector_failures = 0
             except Exception as exc:  # noqa: BLE001
                 stats.errors.append((str(path), f"add failed: {exc}"))
                 # Best-effort rollback of whichever side landed first.
@@ -298,6 +314,12 @@ class Indexer:
                     self.lexical.delete([c.id for c in to_add])
                 except Exception:  # noqa: BLE001
                     pass
+                self._consecutive_vector_failures += 1
+                if self._consecutive_vector_failures >= VECTOR_FAIL_FAST_LIMIT:
+                    raise IndexerStopped(
+                        f"vector writes failed {self._consecutive_vector_failures}x "
+                        f"in a row; aborting run (last file: {path})"
+                    ) from exc
                 return stats
 
         if to_add or to_remove:

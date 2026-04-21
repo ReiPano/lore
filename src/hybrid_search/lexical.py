@@ -155,21 +155,32 @@ class LexicalIndex:
 
     # ---- reads ----------------------------------------------------------
 
-    def search(self, query: str, k: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        k: int = 10,
+        *,
+        source_prefix: str | None = None,
+    ) -> list[tuple[str, float]]:
         fts_query = _sanitize_query(query)
         if not fts_query or k <= 0:
             return []
+        sql = [
+            "SELECT chunk_id, bm25(chunks_fts) AS score",
+            "FROM chunks_fts",
+            "WHERE chunks_fts MATCH ?",
+        ]
+        params: list = [fts_query]
+        if source_prefix:
+            # FTS5's ``source_path`` is UNINDEXED. Match the prefix exactly or
+            # as an ancestor so `foo/` doesn't also match `foo-sibling/...`.
+            sql.append("AND (source_path = ? OR source_path GLOB ?)")
+            params.append(source_prefix)
+            params.append(_prefix_glob(source_prefix))
+        sql.append("ORDER BY score LIMIT ?")
+        params.append(k)
         with self._lock:
-            cur = self._conn.execute(
-                """
-                SELECT chunk_id, bm25(chunks_fts) AS score
-                FROM chunks_fts
-                WHERE chunks_fts MATCH ?
-                ORDER BY score
-                LIMIT ?
-                """,
-                (fts_query, k),
-            )
+            cur = self._conn.execute("\n".join(sql), params)
             rows = cur.fetchall()
         return [(cid, -float(score)) for cid, score in rows]
 
@@ -236,6 +247,14 @@ class LexicalIndex:
         except Exception:
             self._conn.rollback()
             raise
+
+
+def _prefix_glob(source_prefix: str) -> str:
+    # GLOB uses '*' and '?' as wildcards. Escape brackets; match descendants
+    # only (``prefix/foo.md``, ``prefix/sub/x.py`` etc.). The exact match is
+    # handled separately so ``prefix`` without a trailing slash still works.
+    escaped = source_prefix.replace("[", "[[]")
+    return f"{escaped.rstrip('/')}/*"
 
 
 def _sanitize_query(query: str) -> str:

@@ -163,6 +163,59 @@ def test_auth_required_when_token_set(stack) -> None:
         assert resp.status_code == 200
 
 
+def test_health_reports_projects_and_watcher(tmp_path: Path, stack) -> None:
+    lex, _, indexer, search, tmp = stack
+    _write(tmp, "proj-a/note.md", "# Keep\n\nContent about search.")
+    indexer.index_path(tmp / "proj-a")
+
+    from hybrid_search.api import create_app
+    from hybrid_search.projects import ProjectStore
+
+    store = ProjectStore(tmp_path / "projects.json")
+    store.add(tmp / "proj-a", name="proj-a", watch=True)
+
+    app = create_app(
+        search=search,
+        indexer=indexer,
+        project_store=store,
+        watcher_pid_provider=lambda: 42424,
+    )
+    with TestClient(app) as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["qdrant_reachable"] is True
+        assert body["watcher_pid"] == 42424
+        names = {p["name"] for p in body["projects"]}
+        assert "proj-a" in names
+        proj_a = next(p for p in body["projects"] if p["name"] == "proj-a")
+        assert proj_a["chunk_count"] > 0
+
+
+def test_search_with_project_filter(tmp_path: Path, stack) -> None:
+    lex, _, indexer, search, tmp = stack
+    proj_a = _write(tmp, "proj-a/note.md", "# A\n\nwidget_x inside project a")
+    _write(tmp, "proj-b/note.md", "# B\n\nwidget_x inside project b")
+    indexer.index_path(tmp)
+
+    from hybrid_search.api import create_app
+    from hybrid_search.projects import ProjectStore
+
+    store = ProjectStore(tmp_path / "projects.json")
+    store.add(proj_a.parent, name="proj-a", watch=True)
+
+    app = create_app(search=search, indexer=indexer, project_store=store)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/search",
+            json={"query": "widget_x", "k": 5, "project": "proj-a"},
+        )
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        assert results
+        assert all("proj-a" in r["source_path"] for r in results)
+
+
 def test_index_job_error_surfaces(stack) -> None:
     _, _, indexer, search, _ = stack
     with _client(indexer, search) as client:

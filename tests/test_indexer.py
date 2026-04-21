@@ -152,6 +152,32 @@ def test_pdf_and_docx_skipped_when_parsers_missing(tmp_path: Path, stack, monkey
     assert stats.files_skipped_unsupported == 1
 
 
+def test_vector_fail_fast_stops_after_threshold(tmp_path: Path, stack) -> None:
+    lex, vec = stack
+    # Write more files than the fail-fast limit so we can verify only the
+    # threshold worth of errors get recorded before the run bails out.
+    from hybrid_search.indexer import VECTOR_FAIL_FAST_LIMIT
+
+    for i in range(VECTOR_FAIL_FAST_LIMIT + 3):
+        _write(tmp_path, f"doc-{i}.md", f"# {i}\n\nBody of document {i}.")
+
+    class BoomVector:
+        def __init__(self, real):
+            self.real = real
+
+        def __getattr__(self, name):
+            return getattr(self.real, name)
+
+        def add(self, _):
+            raise RuntimeError("qdrant 500")
+
+    indexer = Indexer(lex, BoomVector(vec))
+    stats = indexer.index_path(tmp_path)
+    assert len(stats.errors) <= VECTOR_FAIL_FAST_LIMIT + 1
+    assert any("aborting run" in msg for _, msg in stats.errors)
+    assert stats.chunks_added == 0
+
+
 def test_missing_path_reports_error(stack) -> None:
     lex, vec = stack
     indexer = Indexer(lex, vec)

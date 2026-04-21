@@ -24,6 +24,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .indexer import IndexStats, Indexer
+from .mcp_server import resolve_project_prefix
+from .projects import ProjectStore
 from .search import HybridSearch
 
 log = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(default=10, ge=1, le=500)
     rerank: bool | None = None
+    project: str | None = None
 
 
 class SearchResultModel(BaseModel):
@@ -79,11 +82,21 @@ class DeleteResponse(BaseModel):
     files_removed: int
 
 
+class ProjectHealth(BaseModel):
+    name: str
+    path: str
+    watch: bool
+    chunk_count: int
+
+
 class HealthResponse(BaseModel):
     chunk_count: int
     sources_count: int
     embedding_model: str
     collection_name: str
+    qdrant_reachable: bool
+    watcher_pid: int | None = None
+    projects: list[ProjectHealth] = Field(default_factory=list)
 
 
 # ---- job registry -----------------------------------------------------
@@ -137,6 +150,8 @@ def create_app(
     search: HybridSearch,
     indexer: Indexer,
     auth_token: str | None = None,
+    project_store: ProjectStore | None = None,
+    watcher_pid_provider=None,
 ) -> FastAPI:
     app = FastAPI(title="Hybrid Search", version="0.1.0")
     registry = JobRegistry()
@@ -154,7 +169,13 @@ def create_app(
 
     @app.post("/search", response_model=SearchResponse, dependencies=guard)
     async def search_endpoint(req: SearchRequest) -> SearchResponse:
-        results = await search.aquery(req.query, req.k, rerank=req.rerank)
+        prefix = resolve_project_prefix(req.project, project_store=project_store)
+        results = await search.aquery(
+            req.query,
+            req.k,
+            rerank=req.rerank,
+            source_prefix=prefix,
+        )
         return SearchResponse(
             results=[
                 SearchResultModel(
@@ -201,14 +222,63 @@ def create_app(
     async def health_endpoint() -> HealthResponse:
         count = await asyncio.to_thread(indexer.lexical.count)
         sources = await asyncio.to_thread(indexer.lexical.sources)
+        qdrant_ok = await asyncio.to_thread(_qdrant_reachable, indexer)
+        projects_health: list[ProjectHealth] = []
+        if project_store is not None:
+            loaded = await asyncio.to_thread(project_store.load)
+            for p in loaded:
+                chunks = await asyncio.to_thread(
+                    _count_chunks_for_source, indexer, p.path
+                )
+                projects_health.append(
+                    ProjectHealth(
+                        name=p.name,
+                        path=p.path,
+                        watch=p.watch,
+                        chunk_count=chunks,
+                    )
+                )
+        watcher_pid: int | None = None
+        if watcher_pid_provider is not None:
+            try:
+                watcher_pid = watcher_pid_provider()
+            except Exception:  # noqa: BLE001
+                watcher_pid = None
         return HealthResponse(
             chunk_count=count,
             sources_count=len(sources),
             embedding_model=indexer.vector.embedder.model_name,
             collection_name=indexer.vector.collection_name,
+            qdrant_reachable=qdrant_ok,
+            watcher_pid=watcher_pid,
+            projects=projects_health,
         )
 
     return app
+
+
+def _qdrant_reachable(indexer: Indexer) -> bool:
+    try:
+        return bool(
+            indexer.vector._client.collection_exists(indexer.vector.collection_name)
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _count_chunks_for_source(indexer: Indexer, source_prefix: str) -> int:
+    """Approximate per-project chunk count via GLOB on the FTS schema.
+
+    Uses the same prefix matching rules as ``LexicalIndex.search``.
+    """
+    lex = indexer.lexical
+    with lex._lock:  # reuse the shared connection lock
+        cur = lex._conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE source_path = ? OR source_path GLOB ?",
+            (source_prefix, f"{source_prefix.rstrip('/')}/*"),
+        )
+        row = cur.fetchone()
+    return int(row[0]) if row else 0
 
 
 async def _run_index_job(

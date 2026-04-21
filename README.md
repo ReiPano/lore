@@ -456,6 +456,19 @@ Drives `claude-agent-sdk` against the same task list under three configs (`plain
 - **`project not found`** — you passed a name that does not match `lore projects list`. Use the name, not the path.
 - **Index looks empty after restart** — Qdrant container storage lives under `~/.lore/qdrant/` (mounted via `HYBRID_QDRANT_DATA`). If you reset that directory, run `lore projects reindex` to rebuild.
 
+### Qdrant corruption (migration / power loss)
+
+If index runs flood the log with `HTTP/1.1 500 Internal Server Error` on `/collections/.../points`, Qdrant's segment directory is probably in a bad state (partial writes, swapped volume mid-run, OS crash). Recover by wiping the Qdrant bind-mount and reindexing from SQLite:
+
+```bash
+lore down
+rm -rf ~/.lore/qdrant
+lore up --watch
+lore projects reindex
+```
+
+SQLite keeps the full text + chunk IDs, so only the vector side is rebuilt. Starting with `v0.3.0` the indexer fails fast after five consecutive vector-write errors so the issue can't hide behind a silent progress bar.
+
 ### Data orphans
 
 - Changing `index_path` or `embedding_model` in `config.yaml` strands old data. Either migrate files manually or run `make reset` + reindex.

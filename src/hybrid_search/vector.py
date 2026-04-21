@@ -224,23 +224,57 @@ class VectorIndex:
 
     # ---- reads ----------------------------------------------------------
 
-    def search(self, query: str, k: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        k: int = 10,
+        *,
+        source_prefix: str | None = None,
+    ) -> list[tuple[str, float]]:
         if k <= 0 or not query or not query.strip():
             return []
         vec = _to_list(self.embedder.embed_one(query))
+        return self.search_by_vector(vec, k, source_prefix=source_prefix)
+
+    def search_by_vector(
+        self,
+        vector: list[float],
+        k: int = 10,
+        *,
+        source_prefix: str | None = None,
+        exclude_ids: list[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        if k <= 0 or not vector:
+            return []
+        # Over-retrieve when we need to post-filter by source_prefix or exclude
+        # specific chunk ids. Prefix match happens in Python because Qdrant
+        # stores ``source_path`` as an unindexed string payload.
+        extra = 0
+        if source_prefix:
+            extra = max(k * 4, 50)
+        if exclude_ids:
+            extra = max(extra, len(exclude_ids))
         result = self._client.query_points(
             collection_name=self.collection_name,
-            query=vec,
-            limit=k,
+            query=list(vector),
+            limit=k + extra,
             query_filter=_chunk_only_filter(),
             with_payload=True,
         )
+        excluded = set(exclude_ids or ())
         out: list[tuple[str, float]] = []
         for point in result.points:
             payload = point.payload or {}
             cid = payload.get("chunk_id")
-            if cid:
-                out.append((cid, float(point.score)))
+            if not cid or cid in excluded:
+                continue
+            if source_prefix and not _path_matches_prefix(
+                payload.get("source_path", ""), source_prefix
+            ):
+                continue
+            out.append((cid, float(point.score)))
+            if len(out) >= k:
+                break
         return out
 
     def count(self) -> int:
@@ -250,6 +284,13 @@ class VectorIndex:
             exact=True,
         )
         return int(res.count)
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    if not path or not prefix:
+        return False
+    # Accept exact match as well as descendant paths.
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
 
 
 def _chunk_point_id(chunk_id: str) -> int:

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — Milestone 2 (agent UX + reliability)
+
+- **Project-scoped search.** `HybridSearch.aquery` now accepts `source_prefix`; `LexicalIndex.search` filters by exact path or `path/*` GLOB; `VectorIndex.search` and the new `VectorIndex.search_by_vector` helper post-filter by prefix and support id exclusion. MCP `search` and HTTP `POST /search` gain a `project` argument resolved via `ProjectStore` (names) or raw path prefix. CLI `lore query --project NAME` plumbs it through.
+- **`search_in_file(path, query)` tool + method.** Convenience wrapper that scopes to one file or directory and disables aggregation so you can see every hit inside it.
+- **`related(chunk_id, k, project)` tool + method.** Re-embeds a chunk's text and runs a vector-only search excluding the seed; lets agents follow "more like this" threads.
+- **MCP tool docstrings rewritten** with concrete guidance on when to scope, rerank, and reach for `related`.
+- **Richer `/health`.** Reports `qdrant_reachable`, `watcher_pid`, embedding model, collection name, and per-project `chunk_count`. `ProjectStore` and `watcher_pid_provider` wired into `create_app`.
+- **Graceful Ctrl-C.** `cli.main()` catches `KeyboardInterrupt`, prints `interrupted`, and exits 130 — no more onnxruntime tracebacks when you stop a long reindex.
+- **Visible errors.** `_print_index_summary` now shows the error count by default and the first three messages; `-v` surfaces up to 20.
+- **Qdrant fail-fast.** After 5 consecutive vector-write failures `Indexer` raises `IndexerStopped` so a corrupted collection or dead Qdrant can't silently eat an entire run.
+- **Migration runbook** in README covers the `~/.lore/qdrant` wipe + reindex recovery.
+- **Tests** added for project-scoped search, `search_in_file`, `related`, MCP project filtering, richer `/health`, and the fail-fast indexer. Suite now at 167 tests.
+
 ## 0.2.0 — Milestone 1 (polish, security, CI)
 
 - **File-level hit aggregation.** `HybridSearch.aquery` now diversifies results by `source_path` so one hot file cannot monopolize the top-k. Enabled by default (`aggregate_by_file=True`); override per-call or disable in the constructor. New helper `_dedupe_by_source` in `search.py`.

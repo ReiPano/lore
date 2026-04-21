@@ -362,12 +362,21 @@ def _cmd_projects_add(args: argparse.Namespace, cfg: Config) -> int:
 def _print_index_summary(name: str, stats, *, verbose: bool) -> None:
     if verbose:
         console.print_json(json.dumps(asdict(stats), default=str))
+        if stats.errors:
+            console.print("[red]errors:[/red]")
+            for path, msg in stats.errors[:20]:
+                console.print(f"  {path}: {msg}")
+            if len(stats.errors) > 20:
+                console.print(f"  … {len(stats.errors) - 20} more")
         return
     extras = []
     if stats.files_skipped_unsupported:
         extras.append(f"{stats.files_skipped_unsupported} skipped (ext)")
     if stats.files_skipped_too_large:
         extras.append(f"{stats.files_skipped_too_large} skipped (size)")
+    skipped_sensitive = getattr(stats, "files_skipped_sensitive", 0)
+    if skipped_sensitive:
+        extras.append(f"{skipped_sensitive} skipped (sensitive)")
     if stats.files_skipped_unchanged:
         extras.append(f"{stats.files_skipped_unchanged} unchanged")
     if stats.errors:
@@ -378,6 +387,15 @@ def _print_index_summary(name: str, stats, *, verbose: bool) -> None:
         f"in {stats.files_indexed} files"
         f" -{stats.chunks_removed} removed" + tail
     )
+    if stats.errors:
+        # Always show the first couple of error messages so silent failures
+        # never slip past the default summary. Use -v for the full dump.
+        for path, msg in stats.errors[:3]:
+            console.print(f"    [red]!{msg}[/red]  {path}")
+        if len(stats.errors) > 3:
+            console.print(
+                f"    [red](… {len(stats.errors) - 3} more; use -v to see all)[/red]"
+            )
 
 
 def _cmd_projects_add_all(args: argparse.Namespace, cfg: Config) -> int:
@@ -531,7 +549,20 @@ def _cmd_query(args: argparse.Namespace, cfg: Config) -> int:
     lex, vec, _ = _build_stack(cfg)
     try:
         search = _build_search(cfg, lex, vec)
-        results = asyncio.run(search.aquery(args.text, args.k, rerank=args.rerank))
+        prefix: str | None = None
+        project = getattr(args, "project", None)
+        if project:
+            store = _project_store(cfg)
+            hit = store.find(project)
+            prefix = hit.path if hit is not None else project
+        results = asyncio.run(
+            search.aquery(
+                args.text,
+                args.k,
+                rerank=args.rerank,
+                source_prefix=prefix,
+            )
+        )
         for r in results:
             payload = {
                 "chunk_id": r.chunk_id,
@@ -555,7 +586,15 @@ def _cmd_serve_api(args: argparse.Namespace, cfg: Config) -> int:
     lex, vec, _ = _build_stack(cfg)
     indexer = _build_indexer(cfg, lex, vec)
     search = _build_search(cfg, lex, vec)
-    app = create_app(search=search, indexer=indexer, auth_token=cfg.api.auth_token)
+    store = _project_store(cfg)
+    data_dir = _data_dir(cfg)
+    app = create_app(
+        search=search,
+        indexer=indexer,
+        auth_token=cfg.api.auth_token,
+        project_store=store,
+        watcher_pid_provider=lambda: watcher_running(data_dir),
+    )
     try:
         uvicorn.run(
             app,
@@ -589,7 +628,11 @@ def _cmd_serve_mcp(args: argparse.Namespace, cfg: Config) -> int:
     lex, vec, _ = _build_stack(cfg)
     indexer = _build_indexer(cfg, lex, vec)
     search = _build_search(cfg, lex, vec)
-    server = create_server(search=search, indexer=indexer)
+    server = create_server(
+        search=search,
+        indexer=indexer,
+        project_store=_project_store(cfg),
+    )
     try:
         server.run()
     finally:
@@ -772,6 +815,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_query.add_argument("--rerank", action="store_true", default=None)
     p_query.add_argument("--no-rerank", action="store_false", dest="rerank")
     p_query.add_argument("--full", action="store_true", help="Print full chunk text.")
+    p_query.add_argument(
+        "--project",
+        default=None,
+        help="Restrict search to a registered project (name) or raw path prefix.",
+    )
     p_query.set_defaults(func=_cmd_query, rerank=None)
 
     p_api = sub.add_parser("serve-api", parents=[common], help="Run the FastAPI HTTP server")
@@ -843,12 +891,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     verbose = bool(getattr(args, "verbose", False))
-    if args.command in NO_CONFIG_COMMANDS:
-        configure_logging(verbose=verbose)
-        return args.func(args)
-    cfg = load_config(args.config)
-    configure_logging(verbose=verbose, log_path=cfg.log_path)
-    return args.func(args, cfg)
+    try:
+        if args.command in NO_CONFIG_COMMANDS:
+            configure_logging(verbose=verbose)
+            return args.func(args)
+        cfg = load_config(args.config)
+        configure_logging(verbose=verbose, log_path=cfg.log_path)
+        return args.func(args, cfg)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]interrupted[/yellow]")
+        return 130
 
 
 def index_cmd() -> int:
