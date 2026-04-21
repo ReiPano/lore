@@ -46,7 +46,34 @@ Local hybrid search (BM25 + vector) for MCP-compatible agents and plain HTTP cli
 
 ## Install
 
-### 1. Clone and install
+### Option A — pipx (recommended once 0.5.0 is on PyPI)
+
+```bash
+pipx install lore-memory
+lore init
+lore up --watch
+```
+
+`pipx` installs Lore in its own virtualenv and puts the `lore` binary on your `$PATH` automatically.
+
+### Option B — Homebrew (macOS)
+
+```bash
+brew install reipano/lore/lore
+```
+
+Requires [the tap](packaging/homebrew/README.md) — it mirrors the PyPI release. Auto-updates when you run `brew upgrade`.
+
+### Option C — Docker
+
+```bash
+docker run -p 8765:8765 -v ~/.lore:/data ghcr.io/reipano/lore:latest \
+  lore serve-api --host 0.0.0.0
+```
+
+Multi-arch images are published by the release workflow on every `v*` tag.
+
+### Option D — From source (clone and install)
 
 ```bash
 cd /path/where/you/keep/tools
@@ -288,6 +315,27 @@ More examples in [examples/curl.sh](examples/curl.sh).
 ### Auth
 
 Set `api.auth_token` in `~/.lore/config.yaml` to enable. Clients send `Authorization: Bearer <token>`.
+
+### LangChain retriever
+
+```bash
+pip install 'lore-memory[langchain]'
+```
+
+```python
+from hybrid_search.integrations.langchain import LoreRetriever
+
+retriever = LoreRetriever(
+    base_url="http://127.0.0.1:8765",
+    k=5,
+    project="notes",          # optional: scope by registered project name
+    rerank=True,
+)
+docs = retriever.invoke("auth middleware")
+# Async: docs = await retriever.ainvoke("auth middleware")
+```
+
+Each hit becomes a `Document` whose `metadata` carries `chunk_id`, `source_path`, `score`, and the per-component `scores_breakdown`.
 
 ---
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — Milestone 4 (distribution + ecosystem)
+
+- **PyPI package** `lore-memory`. Repackaged with metadata: MIT license, classifiers, keywords, project URLs. Version bumped to `0.5.0`. Console scripts unchanged (`lore`, `hybrid-search` alias).
+- **LangChain retriever.** New optional extra `[langchain]` and `hybrid_search.integrations.langchain.LoreRetriever` wrapping the HTTP `/search` endpoint. Sync + async; supports `project`, `rerank`, and bearer auth.
+- **Release workflow.** `.github/workflows/release.yml` fires on `v*` tags: builds sdist + wheel, uploads to PyPI via trusted publishing, uploads artifacts to the GitHub release, and pushes a multi-tag Docker image (`latest`, `X.Y`, `X.Y.Z`) to `ghcr.io/ReiPano/lore`.
+- **Homebrew tap scaffold.** `dist/homebrew/lore.rb` + `dist/homebrew/README.md` walk through creating `github.com/ReiPano/homebrew-lore` so `brew install reipano/lore/lore` ships a Python 3.12-backed formula that depends on Docker.
+- **Tests.** Added `tests/test_langchain.py` (5 tests) using `httpx.MockTransport` to verify payload shape, auth header, async path, optional-field omission, and HTTP error propagation. Suite now at 180 tests.
+- README gains an "Install" section covering pipx, Homebrew, Docker, and source install paths, plus a LangChain usage snippet under HTTP API.
+
 ## 0.4.0 — Milestone 3 (retrieval quality)
 
 - **Tree-sitter code chunker.** `CodeChunker` now walks the AST when the `tree-sitter-language-pack` extra is installed and emits one chunk per top-level definition (plus any interleaved prose). Covers Python, JS/MJS/CJS/JSX, TS/TSX, Go, Rust, Java, C, C++. Falls back to the regex splitter when the package is missing or a given language is unsupported.
