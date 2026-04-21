@@ -114,3 +114,58 @@ def test_resolve_config_path_errors_cleanly_when_missing(
 
 def test_user_config_path_points_at_lore_dir() -> None:
     assert str(USER_CONFIG_PATH).endswith(".lore/config.yaml")
+
+
+def test_profile_code_applies_preset(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "profile: code\n"
+        "index_path: /tmp/lore-test/lex.sqlite3\n"
+        "qdrant_url: http://localhost:6333\n"
+        "collection_name: lore_test\n"
+        "embedding_model: fake-hash-v1\n"
+        "embedding_dim: 32\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.bm25_weight == 2.0
+    assert cfg.vector_weight == 1.0
+    assert cfg.chunk_size == 400
+    assert cfg.chunk_overlap == 40
+
+
+def test_profile_user_override_wins(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "profile: notes\n"
+        "chunk_size: 900\n"
+        "index_path: /tmp/lore-test/lex.sqlite3\n"
+        "qdrant_url: http://localhost:6333\n"
+        "collection_name: lore_test\n"
+        "embedding_model: fake-hash-v1\n"
+        "embedding_dim: 32\n"
+        "chunk_overlap: 10\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    # Preset suggested chunk_size=300, but the user's explicit 900 wins.
+    assert cfg.chunk_size == 900
+    # Fields the user did not set still come from the preset (vector_weight=2.0).
+    assert cfg.vector_weight == 2.0
+
+
+def test_profile_unknown_raises(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "profile: neverheardofit\n"
+        "index_path: /tmp/lore-test/lex.sqlite3\n"
+        "qdrant_url: http://localhost:6333\n"
+        "collection_name: lore_test\n"
+        "embedding_model: fake-hash-v1\n"
+        "embedding_dim: 32\n"
+        "chunk_size: 500\n"
+        "chunk_overlap: 50\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown profile"):
+        load_config(cfg_path)

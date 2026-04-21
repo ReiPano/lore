@@ -242,17 +242,47 @@ class MarkdownChunker:
         return chunks
 
 
+_TREE_SITTER_LANG_BY_EXT: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".cc": "cpp",
+    ".hh": "cpp",
+}
+
+
 class CodeChunker:
-    """Code chunker that splits on top-level definitions, with line-count fallback."""
+    """Code chunker that prefers tree-sitter boundaries, with regex fallback.
+
+    When the ``tree-sitter-language-pack`` extra is installed we walk the
+    AST and emit one chunk per top-level definition plus any interleaved
+    prose (imports, module docstrings, etc.). Without it we fall back to a
+    regex scan for ``def`` / ``class`` / ``function`` / ``func`` / ``fn`` /
+    ``interface`` and a token chunker for anything oversized.
+    """
 
     def __init__(
         self,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+        *,
+        ext: str | None = None,
     ) -> None:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self._text_fallback = TextChunker(chunk_size, chunk_overlap)
+        self.ext = (ext or "").lower()
 
     def split(
         self,
@@ -263,6 +293,102 @@ class CodeChunker:
     ) -> list[Chunk]:
         if not text.strip():
             return []
+        ts_chunks = self._try_tree_sitter_split(text, source_path, metadata=metadata)
+        if ts_chunks is not None:
+            return ts_chunks
+        return self._regex_split(text, source_path, metadata=metadata)
+
+    # ---- tree-sitter path --------------------------------------------
+
+    def _try_tree_sitter_split(
+        self,
+        text: str,
+        source_path: str,
+        *,
+        metadata: dict[str, Any] | None,
+    ) -> list[Chunk] | None:
+        lang = _TREE_SITTER_LANG_BY_EXT.get(self.ext) if self.ext else None
+        if lang is None:
+            return None
+        parser = _get_tree_sitter_parser(lang)
+        if parser is None:
+            return None
+        try:
+            src_bytes = text.encode("utf-8")
+            tree = parser.parse(src_bytes)
+        except Exception:  # noqa: BLE001 - parser bug or binding mismatch
+            return None
+        byte_to_char = _byte_to_char_map(text)
+        chunks: list[Chunk] = []
+        last_end = 0
+        for node in tree.root_node.children:
+            if node.start_byte > last_end:
+                chunks.extend(
+                    self._emit_block_by_bytes(
+                        text,
+                        byte_to_char,
+                        last_end,
+                        node.start_byte,
+                        source_path,
+                        metadata,
+                    )
+                )
+            chunks.extend(
+                self._emit_block_by_bytes(
+                    text,
+                    byte_to_char,
+                    node.start_byte,
+                    node.end_byte,
+                    source_path,
+                    metadata,
+                )
+            )
+            last_end = node.end_byte
+        if last_end < len(src_bytes):
+            chunks.extend(
+                self._emit_block_by_bytes(
+                    text,
+                    byte_to_char,
+                    last_end,
+                    len(src_bytes),
+                    source_path,
+                    metadata,
+                )
+            )
+        return chunks
+
+    def _emit_block_by_bytes(
+        self,
+        text: str,
+        byte_to_char: list[int],
+        byte_start: int,
+        byte_end: int,
+        source_path: str,
+        metadata: dict[str, Any] | None,
+    ) -> list[Chunk]:
+        char_start = byte_to_char[byte_start] if byte_start < len(byte_to_char) else len(text)
+        char_end = byte_to_char[byte_end] if byte_end < len(byte_to_char) else len(text)
+        block = text[char_start:char_end]
+        if not block.strip():
+            return []
+        if token_count(block) <= self.chunk_size:
+            return [_build_chunk(source_path, block, char_start, metadata)]
+        return self._text_fallback.split(
+            block,
+            source_path,
+            base_offset=char_start,
+            metadata=metadata,
+        )
+
+    # ---- regex fallback ----------------------------------------------
+
+    def _regex_split(
+        self,
+        text: str,
+        source_path: str,
+        *,
+        metadata: dict[str, Any] | None,
+    ) -> list[Chunk]:
         starts = [m.start() for m in _TOP_LEVEL_DEF_RE.finditer(text)]
         if not starts or starts[0] != 0:
             starts = [0, *starts]
@@ -311,7 +437,7 @@ def _pick_chunker(
     if ext in MARKDOWN_EXTENSIONS:
         return MarkdownChunker(chunk_size, chunk_overlap)
     if ext in CODE_EXTENSIONS:
-        return CodeChunker(chunk_size, chunk_overlap)
+        return CodeChunker(chunk_size, chunk_overlap, ext=ext)
     return TextChunker(chunk_size, chunk_overlap)
 
 
@@ -338,6 +464,47 @@ def _fenced_code_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _byte_to_char_map(text: str) -> list[int]:
+    """Return a byte-offset → char-offset map for ``text`` in UTF-8."""
+    src_bytes = text.encode("utf-8")
+    total_bytes = len(src_bytes)
+    mapping = [0] * (total_bytes + 1)
+    byte_pos = 0
+    for char_pos, ch in enumerate(text):
+        width = len(ch.encode("utf-8"))
+        for _ in range(width):
+            if byte_pos < total_bytes:
+                mapping[byte_pos] = char_pos
+                byte_pos += 1
+    mapping[total_bytes] = len(text)
+    return mapping
+
+
+_TREE_SITTER_PARSERS: dict[str, object] = {}
+_TREE_SITTER_UNAVAILABLE: set[str] = set()
+
+
+def _get_tree_sitter_parser(language: str):
+    """Lazy-load a tree-sitter parser, caching successes and failures.
+
+    Returns ``None`` if the ``tree_sitter_language_pack`` package is missing
+    or the given language is not packaged for the current platform.
+    """
+    if language in _TREE_SITTER_PARSERS:
+        return _TREE_SITTER_PARSERS[language]
+    if language in _TREE_SITTER_UNAVAILABLE:
+        return None
+    try:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser(language)
+    except Exception:  # noqa: BLE001 - optional dep, keep fallback path clean
+        _TREE_SITTER_UNAVAILABLE.add(language)
+        return None
+    _TREE_SITTER_PARSERS[language] = parser
+    return parser
+
+
 def _token_char_offsets(enc, tokens: list[int], text: str) -> list[int]:
     """Return a list of length ``len(tokens) + 1`` mapping token boundaries
     to character offsets in ``text``.
@@ -360,17 +527,8 @@ def _token_char_offsets(enc, tokens: list[int], text: str) -> list[int]:
     # byte_to_char[b] = index of the character that starts at byte offset b.
     # The array has len(utf8_bytes) + 1 entries so we can always look up the
     # tail position safely.
-    src_bytes = text.encode("utf-8")
-    total_bytes = len(src_bytes)
-    byte_to_char = [0] * (total_bytes + 1)
-    byte_pos = 0
-    for char_pos, ch in enumerate(text):
-        width = len(ch.encode("utf-8"))
-        for _ in range(width):
-            if byte_pos < total_bytes:
-                byte_to_char[byte_pos] = char_pos
-                byte_pos += 1
-    byte_to_char[total_bytes] = len(text)
+    byte_to_char = _byte_to_char_map(text)
+    total_bytes = len(byte_to_char) - 1
 
     offsets: list[int] = []
     for byte_off in cum_bytes:

@@ -213,6 +213,49 @@ def test_text_chunker_offsets_match_for_large_input() -> None:
         assert token_count(chunk.text) <= 80 + 4
 
 
+def test_code_chunker_uses_tree_sitter_for_python() -> None:
+    tree_sitter = pytest.importorskip("tree_sitter_language_pack")
+    assert tree_sitter  # import side effect
+
+    src = (
+        "import os\n"
+        "\n"
+        "def alpha(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "def beta(x):\n"
+        "    return x * 2\n"
+        "\n"
+        "class Gamma:\n"
+        "    def method(self):\n"
+        "        return 3\n"
+    )
+    chunks = CodeChunker(chunk_size=500, chunk_overlap=50, ext=".py").split(src, "mod.py")
+    texts = [c.text.strip() for c in chunks]
+    # Tree-sitter emits a chunk per top-level node.
+    assert any(t.startswith("def alpha") for t in texts)
+    assert any(t.startswith("def beta") for t in texts)
+    assert any(t.startswith("class Gamma") for t in texts)
+    # Imports live in their own chunk, not glued to a function body.
+    assert any(t == "import os" for t in texts)
+    # Every chunk still slices back out of the source byte-identically.
+    for chunk in chunks:
+        assert src[chunk.start_offset : chunk.end_offset] == chunk.text
+
+
+def test_code_chunker_regex_fallback_when_ext_unknown() -> None:
+    """Unknown extensions fall through to the regex splitter."""
+    src = (
+        "def alpha():\n    return 1\n\n"
+        "def beta():\n    return 2\n"
+    )
+    chunks = CodeChunker(chunk_size=500, chunk_overlap=50, ext=".xyz").split(
+        src, "mod.xyz"
+    )
+    texts = [c.text for c in chunks]
+    assert "".join(texts) == src
+
+
 def test_text_chunker_scales_linearly_for_huge_input() -> None:
     """Sanity check: 200k-token input finishes fast with the new O(n) path."""
     import time

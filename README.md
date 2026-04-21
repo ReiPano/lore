@@ -310,6 +310,7 @@ Edit `~/.lore/config.yaml`. Apply changes with `lore restart`.
 
 | Field | Default | Meaning |
 |---|---|---|
+| `profile` | `mixed` | Preset that pre-fills the fields below. Valid values: `mixed`, `code`, `docs`, `notes`. Explicit values in the same file always win over the preset. |
 | `chunk_size` | 500 | Tokens per chunk. |
 | `chunk_overlap` | 50 | Tokens of overlap between neighbors. |
 | `retrieval_k_per_index` | 50 | Candidates pulled from BM25 and vector before fusion. |
@@ -320,13 +321,22 @@ Edit `~/.lore/config.yaml`. Apply changes with `lore restart`.
 | `rerank_enabled` | true | Toggle cross-encoder reranking. |
 | `default_result_k` | 10 | `k` when the caller omits it. |
 
+Profile summary:
+
+| Profile | bm25 / vector | chunk_size / overlap | Best for |
+|---|---|---|---|
+| `mixed` (default) | 1.0 / 1.0 | 500 / 50 | Heterogeneous corpora. |
+| `code` | 2.0 / 1.0 | 400 / 40 | Source trees — identifier matches matter. |
+| `docs` | 1.0 / 1.5 | 500 / 50 | Long-form prose with headings. |
+| `notes` | 1.0 / 2.0 | 300 / 30 | Short journals or jotted thoughts. |
+
 ### Models
 
 | Field | Default | Meaning |
 |---|---|---|
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | FastEmbed model. 384 dim, cached at `~/.cache/fastembed`. |
 | `embedding_dim` | 384 | Must match the model. |
-| `rerank_model` | `BAAI/bge-reranker-base` | FastEmbed cross-encoder. |
+| `rerank_model` | `BAAI/bge-reranker-v2-m3` | FastEmbed cross-encoder. Automatically falls back to `BAAI/bge-reranker-base` and then `Xenova/ms-marco-MiniLM-L-6-v2` if the primary model fails to download. |
 
 Changing the embedding model requires a fresh collection — Qdrant records the model name and refuses mismatches. Rebuild with `lore projects reindex` **after** wiping Qdrant data (`docker compose down -v`).
 

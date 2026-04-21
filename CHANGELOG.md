@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — Milestone 3 (retrieval quality)
+
+- **Tree-sitter code chunker.** `CodeChunker` now walks the AST when the `tree-sitter-language-pack` extra is installed and emits one chunk per top-level definition (plus any interleaved prose). Covers Python, JS/MJS/CJS/JSX, TS/TSX, Go, Rust, Java, C, C++. Falls back to the regex splitter when the package is missing or a given language is unsupported.
+- **Reranker upgrade.** Default cross-encoder is now `BAAI/bge-reranker-v2-m3`. `Reranker` gracefully falls back to `BAAI/bge-reranker-base` and then `Xenova/ms-marco-MiniLM-L-6-v2` if the primary model cannot load; `Reranker.active_model_name` exposes whichever model ended up serving.
+- **Weight / chunk profiles.** New `profile: mixed | code | docs | notes` key in `config.yaml`. The preset is applied before user fields so any explicit `bm25_weight`, `vector_weight`, `chunk_size`, or `chunk_overlap` still wins.
+- **Tests.** Added `tests/test_rerank.py` (3 tests), profile tests in `tests/test_config.py` (3), and tree-sitter CodeChunker tests in `tests/test_chunking.py` (2). Suite now at 175 tests.
+- Updated shipped [config.yaml](config.yaml), README "Models" and "Chunking and retrieval" sections.
+
 ## 0.3.0 — Milestone 2 (agent UX + reliability)
 
 - **Project-scoped search.** `HybridSearch.aquery` now accepts `source_prefix`; `LexicalIndex.search` filters by exact path or `path/*` GLOB; `VectorIndex.search` and the new `VectorIndex.search_by_vector` helper post-filter by prefix and support id exclusion. MCP `search` and HTTP `POST /search` gain a `project` argument resolved via `ProjectStore` (names) or raw path prefix. CLI `lore query --project NAME` plumbs it through.

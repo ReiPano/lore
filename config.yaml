@@ -2,9 +2,14 @@ index_path: ~/.lore/lexical.sqlite3
 qdrant_url: http://localhost:6333
 collection_name: hybrid_chunks
 
+# Optional weight/chunk preset applied before user-specified fields below.
+# Valid values: mixed | code | docs | notes. Omit or set to `mixed` for the
+# balanced defaults (bm25_weight=1, vector_weight=1, chunk_size=500).
+# profile: mixed
+
 embedding_model: BAAI/bge-small-en-v1.5
 embedding_dim: 384
-rerank_model: BAAI/bge-reranker-base
+rerank_model: BAAI/bge-reranker-v2-m3
 rerank_enabled: true
 
 chunk_size: 500

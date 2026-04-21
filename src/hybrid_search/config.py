@@ -12,6 +12,36 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 CONFIG_ENV_VAR = "LORE_CONFIG"
 LEGACY_CONFIG_ENV_VAR = "HYBRID_SEARCH_CONFIG"
 
+# Tunable weight/chunk presets keyed by ``profile`` in config.yaml. User
+# fields in the same file still win — the preset is applied first so any
+# explicit value overrides it.
+PROFILES: dict[str, dict[str, object]] = {
+    "mixed": {
+        "bm25_weight": 1.0,
+        "vector_weight": 1.0,
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+    },
+    "code": {
+        "bm25_weight": 2.0,
+        "vector_weight": 1.0,
+        "chunk_size": 400,
+        "chunk_overlap": 40,
+    },
+    "docs": {
+        "bm25_weight": 1.0,
+        "vector_weight": 1.5,
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+    },
+    "notes": {
+        "bm25_weight": 1.0,
+        "vector_weight": 2.0,
+        "chunk_size": 300,
+        "chunk_overlap": 30,
+    },
+}
+
 USER_DATA_DIR = Path("~/.lore").expanduser()
 USER_CONFIG_PATH = USER_DATA_DIR / "config.yaml"
 
@@ -109,6 +139,18 @@ class Config:
 def load_config(path: str | Path | None = None) -> Config:
     resolved = resolve_config_path(path)
     raw = _read_yaml(resolved)
+    profile_name = raw.get("profile")
+    if profile_name:
+        preset = PROFILES.get(str(profile_name).lower())
+        if preset is None:
+            raise ValueError(
+                f"unknown profile {profile_name!r}; "
+                f"valid options: {sorted(PROFILES)}"
+            )
+        # User-provided keys win; presets only fill in anything the user
+        # didn't specify explicitly.
+        for key, value in preset.items():
+            raw.setdefault(key, value)
     api_raw: dict[str, Any] = raw.get("api") or {}
     return Config(
         index_path=_p(raw["index_path"]),
